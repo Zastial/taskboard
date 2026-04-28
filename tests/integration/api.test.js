@@ -112,4 +112,101 @@ describe('POST /tasks', () => {
     expect(res.body.title).toBe('New Task');
     expect(res.body.status).toBe('todo');
   });
+
+  test('should return 500 when creation fails', async () => {
+    pool.query.mockRejectedValue(new Error('Database error'));
+
+    const token = generateToken();
+    const res = await request(app)
+      .post('/tasks')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Task', description: 'Desc' });
+
+    expect(res.status).toBe(500);
+    expect(res.body.error).toBe('Internal server error');
+  });
+});
+
+describe('GET /tasks with status filter', () => {
+  test('should filter tasks by status when query parameter provided', async () => {
+    const mockTasks = [
+      { id: 1, title: 'Task 1', status: 'done' },
+    ];
+    pool.query.mockResolvedValue({ rows: mockTasks });
+
+    const token = generateToken();
+    const res = await request(app)
+      .get('/tasks?status=done')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].status).toBe('done');
+  });
+});
+
+describe('PUT /tasks/:id', () => {
+  test('should update a task and return 200', async () => {
+    const updatedTask = { id: 1, title: 'Updated Task', status: 'done', description: 'Updated' };
+    pool.query.mockResolvedValue({ rows: [updatedTask] });
+
+    const token = generateToken();
+    const res = await request(app)
+      .put('/tasks/1')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Updated Task', status: 'done' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.title).toBe('Updated Task');
+    expect(res.body.status).toBe('done');
+  });
+
+  test('should return 404 when task not found', async () => {
+    pool.query.mockResolvedValue({ rows: [] });
+
+    const token = generateToken();
+    const res = await request(app)
+      .put('/tasks/999')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Updated' });
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('Task not found');
+  });
+});
+
+describe('DELETE /tasks/:id', () => {
+  test('should delete a task and return success message', async () => {
+    const deletedTask = { id: 1, title: 'Task to delete' };
+    pool.query.mockResolvedValue({ rows: [deletedTask] });
+
+    const token = generateToken();
+    const res = await request(app)
+      .delete('/tasks/1')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.message).toBe('Task deleted successfully');
+  });
+
+  test('should return 404 when deleting non-existent task', async () => {
+    pool.query.mockResolvedValue({ rows: [] });
+
+    const token = generateToken();
+    const res = await request(app)
+      .delete('/tasks/999')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('Task not found');
+  });
+});
+
+describe('GET /metrics', () => {
+  test('should return 501 for unimplemented metrics endpoint', async () => {
+    const res = await request(app).get('/metrics');
+
+    expect(res.status).toBe(501);
+    expect(res.body.message).toBe('Metrics endpoint not yet implemented');
+  });
 });

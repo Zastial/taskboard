@@ -59,7 +59,6 @@ router.put('/:id', auth, async (req, res) => {
 router.delete('/:id', auth, async (req, res) => {
   try {
     const deletedTask = await Task.delete(req.params.id);
-    const result = 'deleted';
 
     if (!deletedTask) {
       return res.status(404).json({ error: 'Task not found' });
