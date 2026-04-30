@@ -1,0 +1,31 @@
+FROM alpine:latest
+
+# Install OpenSSH server, Docker CLI, and curl
+RUN apk add --no-cache openssh-server docker-cli curl
+
+# Create SSH user for deployment
+RUN adduser -D -s /bin/sh deploy
+RUN chmod 755 /home/deploy
+
+# Configure SSH
+RUN mkdir -p /var/run/sshd
+RUN ssh-keygen -A
+
+# Allow SSH key authentication
+RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config
+RUN sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+RUN sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+
+# Create .ssh directory for deploy user
+RUN mkdir -p /home/deploy/.ssh
+RUN chown deploy:deploy /home/deploy/.ssh
+RUN chmod 700 /home/deploy/.ssh
+
+# Add authorized key
+RUN printf 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDwYL8osWZ+4VAknWJcnEvK45JAl5iqqjUbOO9XCuVowNU+Rd3WeEuI3nDy91qHGSVNtp2pXiuLpxcDFXN08KKpVSVfo3qdAXYnOKZTdWGQgMC8s/uMyC19UkvpkDsifOZ9/6hxOpa8+/Ft/DfUqhlnxqvyBygipE/ffDu31nMC2jgHIuLtMIvzrFsPr1mHpE3vUD551C3iZfftwNTe2kxoKua6dT34rOHDN3yL2DIt1KirAW+5TZeotxt7Fj8E/d3Bdn41iXJ1dHCB6dbfIb8n07K+t0chJEf1xhmqqFQ0VfRGI2tvdFQ5psoOmjDdZDHuVAynW7sZk0l0Dx6kTlbl acarol@SunsStack.local' > /home/deploy/.ssh/authorized_keys
+RUN chown deploy:deploy /home/deploy/.ssh/authorized_keys
+RUN chmod 600 /home/deploy/.ssh/authorized_keys
+
+EXPOSE 22
+
+CMD ["/usr/sbin/sshd", "-D"]

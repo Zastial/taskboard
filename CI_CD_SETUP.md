@@ -99,6 +99,107 @@ docker run -e DATABASE_URL=... -e JWT_SECRET=... ghcr.io/<USERNAME>/taskboard:la
 - Solution: Vérifier que permissions sont correctes dans le workflow
 - Alternative: Utiliser PAT (Personal Access Token) en secret
 
+## Étape 5 — Déploiement local via SSH
+
+### Contexte
+
+L'image est publiée sur GHCR. Pour simuler un déploiement sur un serveur distant sans coût, nous utilisons un tunnel SSH pour exposer un conteneur Docker local (serveur SSH) accessible depuis GitHub Actions.
+
+### Architecture
+
+```
+GitHub Actions runner
+        │
+        │  SSH via tunnel public
+        ▼
+localhost.run (tunnel)
+        │
+        ▼
+Machine locale — port 2222 exposé
+        │
+        ▼
+Conteneur "taskboard-ssh"
+(simule serveur distant)
+  - OpenSSH server
+  - Accès socket Docker hôte
+  - Authentification par clé SSH
+        │
+        │  docker pull + docker run
+        ▼
+Conteneur "taskboard-app"
+(application déployée)
+```
+
+### Prérequis
+
+#### 1. Générer la clé SSH
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/localhost_run -N ''
+```
+
+#### 2. Ouvrir le tunnel
+```bash
+./start-tunnel.sh
+```
+- Note l'URL publique affichée (ex: `https://xxxxx.localhost.run`)
+- Le tunnel expose le port 2222 (SSH) sur cette URL
+
+#### 3. Démarrer l'environnement local
+```bash
+docker-compose up -d ssh-server
+```
+
+#### 4. Configurer les secrets GitHub
+- `SSH_PRIVATE_KEY`: Contenu de `~/.ssh/localhost_run` (clé privée)
+- `TUNNEL_HOST`: Domaine du tunnel (ex: `xxxxx.localhost.run`)
+- `TUNNEL_PORT`: `80` (port exposé par localhost.run)
+
+### Déploiement automatique
+
+Le job `deploy` s'exécute uniquement sur `main` après le push GHCR réussi.
+
+#### Critères de validation
+- ✅ Push sur `main` déclenche la pipeline complète
+- ✅ Application accessible sur `http://localhost:3000` après déploiement
+- ✅ Script idempotent (relance sans erreur)
+- ✅ Pipeline en erreur si healthcheck échoue
+
+### Outils de tunnel comparés
+
+| Outil | Gratuit | Installation | Compte requis | URL stable | Durée session | Fiabilité |
+|-------|---------|--------------|---------------|------------|--------------|-----------|
+| localhost.run | ✅ | Aucune | Non | Non (aléatoire) | ∞ (persistent) | Moyenne |
+| ngrok | ⚠️ (1h/jour) | CLI | Oui | Oui (payant) | 8h gratuit | Élevée |
+| Cloudflare Tunnel | ✅ | CLI | Oui | Oui | ∞ | Élevée |
+| Pinggy | ✅ | CLI | Non | Non | 1h | Faible |
+| serveo.net | ✅ | Aucune | Non | Non | ∞ | Moyenne |
+
+**Choix : localhost.run** - Simple, gratuit, pas de compte requis.
+
+### Sécurité
+
+- Clé SSH dédiée au déploiement
+- Pas de mot de passe (authentification par clé uniquement)
+- Accès Docker limité au socket (pas de root)
+- Tunnel chiffré (SSH)
+
+### Dépannage déploiement
+
+#### Tunnel ne se connecte pas
+- Vérifier que `ssh-server` est démarré
+- Vérifier la clé publique dans `authorized_keys`
+- Tester connexion locale: `ssh -p 2222 deploy@localhost`
+
+#### Déploiement échoue
+- Vérifier secrets GitHub corrects
+- Vérifier image disponible sur GHCR
+- Logs: Actions → deploy job → SSH output
+
+#### Healthcheck échoue
+- Vérifier DB et app démarrés: `docker ps`
+- Vérifier logs: `docker logs taskboard-app`
+- Tester endpoint: `curl http://localhost:3000/health`
+
 ## Performance
 
 ### Timing type
