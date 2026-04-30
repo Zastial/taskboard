@@ -412,3 +412,76 @@ Artefacts générés :
 Images GHCR (après merge main) :
 - ghcr.io/username/taskboard:latest
 - ghcr.io/username/taskboard:main-abc1234
+
+## Étape 5 - Déploiement local via SSH
+
+### Contexte
+
+L'image est publiée sur GHCR. Il faut maintenant la déployer automatiquement. Sans serveur payant, l'astuce est de simuler un serveur distant avec un conteneur Docker tournant sur votre machine, rendu accessible depuis GitHub Actions via un tunnel SSH.
+
+### Analyse du problème
+
+**1. Comment GitHub Actions peut-il se connecter à une machine locale derrière un NAT ?**
+
+- GitHub Actions s'exécute sur les serveurs GitHub (infrastructure cloud).
+- Une machine locale derrière NAT/routeur n'est pas directement accessible.
+- Solution : **tunnel SSH inversé (reverse SSH tunnel)** :
+  - La machine locale initie une connexion SSH *sortante* vers un serveur public (bastion).
+  - Cette connexion ouvre un port sur le serveur public qui forward le trafic vers le localhost de la machine locale.
+  - GitHub Actions se connecte au serveur public, qui tunnel le trafic jusqu'à la machine locale.
+  - Exemple : `ssh -R 8080:localhost:3000 user@bastion.com` expose l'app locale sur `bastion.com:8080`.
+
+**2. Qu'est-ce qu'un tunnel SSH ? Comment fonctionne le port forwarding inversé (`R`) ?**
+
+- **Tunnel SSH** : chiffre tout le trafic TCP à travers une connexion SSH sécurisée entre deux machines.
+- **Port forwarding normal (`-L`)** : `ssh -L 8080:remote-host:3000 user@server`
+  - Écoute localement sur 8080.
+  - Forward vers `remote-host:3000` via le tunnel.
+  - Cas d'usage : accéder à un service privé sur le réseau du serveur.
+- **Port forwarding inversé (`-R`)** : `ssh -R 8080:localhost:3000 user@server`
+  - Écoute sur le serveur (remote) sur le port 8080.
+  - Forward vers `localhost:3000` sur la machine client.
+  - Cas d'usage : exposer un service local à des clients externes.
+  - **Avantage** : pas besoin d'ouvrir de ports sur le firewall local ; la machine initie la connexion.
+
+**3. Qu'est-ce qu'un déploiement **idempotent** ? Pourquoi est-ce important ?**
+
+- **Déploiement idempotent** : exécuter le même script de déploiement plusieurs fois doit produire le même résultat (pas d'effet de bord ou d'erreur).
+- Principes :
+  - Arrêter le conteneur ancien avant de lancer le nouveau (pas de conflit de ports).
+  - Utiliser `docker pull` pour la version la plus récente.
+  - Vérifier l'état avant agir (ex: `if [ "$(docker ps -q -f name=taskboard)" ]`).
+  - Utiliser `--restart=always` pour la résilience.
+- **Importance** :
+  - Redéploiements sans intervention manuelle.
+  - CI/CD robuste : re-run du pipeline = même résultat.
+  - Rollback facile en cas d'erreur.
+
+**4. Qu'est-ce qu'un healthcheck post-déploiement ? Que doit-il vérifier ?**
+
+- **Healthcheck** : script qui valide que l'application est fonctionnelle après déploiement.
+- Ce qu'il doit vérifier :
+  - **Endpoint `/health`** : réponse 200 (ou 503 si DB absent).
+  - **Connectivité réseau** : curl ou netcat pour vérifier le port accessible.
+  - **Base de données** : connexion réussie (ex: requête SQL simple).
+  - **Logs sans erreurs** : `docker logs` pour identifier les crashs.
+  - **Métriques de ressources** : CPU/mémoire dans les limites (alerter si 80%+).
+  - **Délai** : attendre quelques secondes que l'app démarre avant de tester.
+- Implémentation Docker :
+  ```dockerfile
+  HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
+    CMD curl -f http://localhost:3000/health || exit 1
+  ```
+- Implémentation CI/CD :
+  ```bash
+  for i in {1..30}; do
+    if curl -f http://localhost:8080/health; then
+      echo "✓ App healthy"
+      exit 0
+    fi
+    sleep 2
+  done
+  echo "✗ App failed to start"
+  exit 1
+  ```
+
